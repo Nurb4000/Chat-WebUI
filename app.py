@@ -229,7 +229,7 @@ def handle_youtube_command(user_content):
                 transcript = transcript_list.find_transcript([language_available[0]]).fetch()
             
             # Join the transcript entries into a single string with no newlines
-            transcript_text = ' '.join(entry['text'] for entry in transcript)
+            transcript_text = ' '.join(snippet.text for snippet in transcript.snippets)
             return transcript_text
         except Exception as e:
             return f"Error getting transcript: {str(e)}"
