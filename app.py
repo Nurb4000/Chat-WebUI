@@ -142,7 +142,7 @@ def parse_results(html_content, results=DEFAULT_RESULTS):
 
     for a in results_list:
         href = a.get('href')
-        if 'duckduckgo.com' not in href:
+        if 'duckduckgo.com' not in href and 'reddit.com' not in href and 'youtube.com' not in href:
             countLink += 1
             print(f'Source URL number {countLink}: {href}')
             links.append(href)
@@ -151,7 +151,7 @@ def parse_results(html_content, results=DEFAULT_RESULTS):
     print()
     countLink = 0
     return links
-# Function to fetch and extract text from a URL and format it
+
 async def fetch_and_format_text(session, url, index, retries=RETRY_LIMIT):
     for attempt in range(retries + 1):
         try:
@@ -248,7 +248,7 @@ def handle_webpage_command(user_content):
         
     url = match.group(0)
     try:
-        response = httpx.get(url)
+        response = httpx.get(url, follow_redirects=True)
         response.raise_for_status()
         
         content_type = response.headers.get('Content-Type', '')
@@ -261,8 +261,15 @@ def handle_webpage_command(user_content):
         )
         
         return cleaned_text
-    except (httpx.RequestError, httpx.HTTPStatusError, Exception) as e:
-        raise Exception(f"An error occurred while fetching the webpage: {e}")
+    except httpx.HTTPStatusError as e:
+        # Specifically handle HTTP errors like 404, 403, etc., after following redirects
+        raise Exception(f"HTTP error {e.response.status_code} while fetching the webpage: {e}")
+    except httpx.RequestError as e:
+        # Handle network errors, timeouts, etc.
+        raise Exception(f"Network error occurred while fetching the webpage: {e}")
+    except Exception as e:
+        # Handle any other unexpected errors during fetching/parsing
+        raise Exception(f"An unexpected error occurred while fetching the webpage: {e}")
 
 def handle_arxiv_command(user_content):
     """Handle arXiv PDF and abstract URLs, returning the extracted text."""
@@ -337,13 +344,21 @@ def chat():
 
     # Convert string values to appropriate types for numeric parameters
     if parameters:
-        for key in parameters:
-            try:
-                # Try to convert to float for numeric values
-                parameters[key] = float(parameters[key])
-            except (ValueError, TypeError):
-                # Keep as is if not numeric
-                continue
+        for key, value in parameters.items():
+            if isinstance(value, str):
+                # Try int first
+                try:
+                    parameters[key] = int(value)
+                    continue
+                except ValueError:
+                    pass
+                # Then try float
+                try:
+                    parameters[key] = float(value)
+                except ValueError:
+                    # leave non-numeric strings untouched
+                    pass
+            # non-string values are left as-is
 
     additional_text = ""
     # Only process search commands if user_content is a string (not an image message)
@@ -453,10 +468,33 @@ def chat():
                     stream=True
                 )
 
+            # Track if we've sent the start tag for reasoning content
+            reasoning_started = False
+            reasoning_ended = False
+            
             for chunk in stream:
-                if not chunk.choices or not chunk.choices[0].delta or chunk.choices[0].delta.content is None:
+                if not chunk.choices or not chunk.choices[0].delta:
                     continue
-                yield chunk.choices[0].delta.content
+                
+                # Handle regular content
+                if chunk.choices[0].delta.content is not None:
+                    # If we were outputting reasoning content, end it
+                    if reasoning_started and not reasoning_ended:
+                        yield "</think>"
+                        reasoning_ended = True
+                    yield chunk.choices[0].delta.content
+                
+                # Handle reasoning content (if supported by the model)
+                if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content is not None:
+                    # If this is the first reasoning content, start it
+                    if not reasoning_started:
+                        yield "<think>"
+                        reasoning_started = True
+                    yield chunk.choices[0].delta.reasoning_content
+            
+            # If we started reasoning but never ended it, end it now
+            if reasoning_started and not reasoning_ended:
+                yield "</think>"
         except Exception as e:
             yield f"An error occurred: {str(e)}"
 
@@ -470,6 +508,24 @@ def continue_generation():
     system_content = request.json.get('systemContent', SYSTEM_CONTENT)
     parameters = request.json.get('parameters', {})
 
+    # Convert string values to appropriate types for numeric parameters
+    if parameters:
+        for key, value in parameters.items():
+            if isinstance(value, str):
+                # Try int first
+                try:
+                    parameters[key] = int(value)
+                    continue
+                except ValueError:
+                    pass
+                # Then try float
+                try:
+                    parameters[key] = float(value)
+                except ValueError:
+                    # leave non-numeric strings untouched
+                    pass
+            # non-string values are left as-is
+
     if system_content == '':
         messages = conversation_history
     else:
@@ -481,7 +537,6 @@ def continue_generation():
             return
 
         try:
-            print(messages)
             if parameters:
                 stream = openai_client.chat.completions.create(
                     model=selected_model,
@@ -496,10 +551,33 @@ def continue_generation():
                     stream=True
                 )
 
+            # Track if we've sent the start tag for reasoning content
+            reasoning_started = False
+            reasoning_ended = False
+            
             for chunk in stream:
-                if not chunk.choices or not chunk.choices[0].delta or chunk.choices[0].delta.content is None:
+                if not chunk.choices or not chunk.choices[0].delta:
                     continue
-                yield chunk.choices[0].delta.content
+                
+                # Handle regular content
+                if chunk.choices[0].delta.content is not None:
+                    # If we were outputting reasoning content, end it
+                    if reasoning_started and not reasoning_ended:
+                        yield "</think>"
+                        reasoning_ended = True
+                    yield chunk.choices[0].delta.content
+                
+                # Handle reasoning content (if supported by the model)
+                if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content is not None:
+                    # If this is the first reasoning content, start it
+                    if not reasoning_started:
+                        yield "</think>"
+                        reasoning_started = True
+                    yield chunk.choices[0].delta.reasoning_content
+            
+            # If we started reasoning but never ended it, end it now
+            if reasoning_started and not reasoning_ended:
+                yield "</think>"
         except Exception as e:
             yield f"An error occurred: {str(e)}"
 
@@ -516,15 +594,11 @@ def generate_title():
         messages = [
             {
                 "role": "system",
-                "content": "You are an expert at generating short titles for conversations. Generate a very brief title (MAXIMUM 5 words) for a conversation based on the user's message and the assistant's response. The title should capture the main topic or purpose of the conversation. Respond with ONLY the title, without quotes, extra text, or any other characters."
+                "content": "Generate a 5-word max title for this conversation. Focus on the main topic. Respond ONLY with the title without any quotation."
             },
             {
                 "role": "user",
                 "content": f"User message: {message} \n \n Assistant response: {assistant_response}"
-            },
-            {
-                "role": "assistant",
-                "content": "The suitable title for this conversation is: "
             }
         ]
         
