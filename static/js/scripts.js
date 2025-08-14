@@ -9,6 +9,7 @@ const PARAMETER_PRESETS = {
 let START_TAG = '<think>';  // Default start tag
 let END_TAG = '</think>';     // Default end tag
 
+
 // Add this at the top with other constants
 const DEFAULT_END_TAG = ['</think>', '<|end_of_thought|>']; // Add any other common end tags here
 
@@ -97,14 +98,11 @@ function checkForEndTag(content) {
 }
 
 function formatUserMessage(input) {
-    // Escape HTML special characters
-    const escapedInput = input
+    return input
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
-
-    // Replace newlines with <br> tags
-    return escapedInput.replace(/\n/g, '<br>');
+        .replace(/>/g, "&gt;")
+        .replace(/\n/g, '<br>');
 }
 
 const options = {
@@ -147,18 +145,24 @@ function replaceLatexSyntax(content) {
 function preprocessMarkdown(content, expanded = false, messageEndTag = null) {
     // Replace LaTeX syntax before processing
     content = replaceLatexSyntax(content);
-    // Try message's stored end tag first if available
-    let index = -1;
-    let tagLength = 0;
     
-    if (messageEndTag) {
-        index = content.indexOf(messageEndTag);
-        tagLength = messageEndTag.length;
-    }
+    // Check for both start and end tags to form a complete thought process block
+    const startIndex = content.indexOf(START_TAG);
+    const endIndex = content.indexOf(END_TAG);
     
-    if (index !== -1) {
-        const hiddenText = content.substring(0, index).trim();
-        const remainder = content.substring(index + tagLength);
+    // If we have both start and end tags in the correct order
+    if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+        // Extract the hidden text between the tags
+        const hiddenText = content.substring(startIndex + START_TAG.length, endIndex).trim();
+        // Get the remainder after the end tag
+        let remainder = content.substring(endIndex + END_TAG.length);
+        
+        // Process remainder for proper formatting
+        if (remainder.startsWith('\n') && !remainder.startsWith('\n\n')) {
+            remainder = '\n' + remainder;
+        } else if (!remainder.startsWith('\n')) {
+            remainder = '\n\n' + remainder;
+        }
         
         // Get duration from current stream or from message history
         let durationText = '';
@@ -196,8 +200,8 @@ function preprocessMarkdown(content, expanded = false, messageEndTag = null) {
         }
     }
 
-    // If no closing tag is found, simply escape any standalone tags
-    return content.replace(new RegExp(`${escapeRegExp(END_TAG)}`, 'gi'), (match) => escapeHtml(match));
+    // If no complete thought process block, escape both start and end tags
+    return content.replace(new RegExp(`${escapeRegExp(START_TAG)}|${escapeRegExp(END_TAG)}`, 'gi'), (match) => escapeHtml(match));
 }
 
 // Helper function to escape special characters in regex
@@ -1627,6 +1631,8 @@ userInput.addEventListener('input', function() {
 });
 
 function startNewChat() {
+    userInput.placeholder = "Enter your message";
+    
     // Abort any ongoing stream before starting new chat
     if (currentController) {
         // Save partial response before aborting
@@ -3488,6 +3494,33 @@ function convertImageToBase64(file) {
 // File input event listener
 fileInput.addEventListener('change', handleFileSelect);
 
+
+// Input field event listener for handling first letter case based on Shift key
+userInput.addEventListener('keydown', (event) => {
+    // Ignore if Ctrl, Alt, or Meta keys are pressed (allow shortcuts like Ctrl+V)
+    if (event.ctrlKey || event.altKey || event.metaKey) {
+        return;
+    }
+
+    const value = userInput.value;
+    const isFirstChar = value.length === 0;
+    // Check if the pressed key is a single alphabetical character
+    const isLetter = event.key.length === 1 && event.key.match(/[a-z]/i);
+
+    if (isFirstChar && isLetter) {
+        if (event.shiftKey) {
+            // If Shift is pressed for the first letter, make it lowercase
+            event.preventDefault(); // Prevent default uppercase insertion
+            userInput.value = event.key.toLowerCase(); // Manually insert lowercase
+        } else {
+            // If Shift is NOT pressed for the first letter, make it uppercase
+            event.preventDefault(); // Prevent default lowercase insertion
+            userInput.value = event.key.toUpperCase(); // Manually insert uppercase
+        }
+    }
+    // Allow default behavior for all other keys or subsequent characters
+});
+
 // Deep query toggle function
 function toggleDeepQuery() {
     isDeepQueryMode = !isDeepQueryMode;
@@ -3546,54 +3579,103 @@ async function handlePaste(event) {
 // Function to compress images
 async function compressImage(file) {
     return new Promise((resolve, reject) => {
+        // If file is already smaller than 10MB, return it as is
+        const maxSizeBytes = 10 * 1024 * 1024; // 10MB
+        if (file.size <= maxSizeBytes) {
+            resolve(file);
+            return;
+        }
+        
         const img = new Image();
         img.src = URL.createObjectURL(file);
         
-        img.onload = () => {
+        img.onload = async () => {
             URL.revokeObjectURL(img.src);
             
-            // Calculate new dimensions while maintaining aspect ratio
-            let width = img.width;
-            let height = img.height;
-            const maxDimension = 1024;
+            // Initial compression settings
+            let currentQuality = 0.9;
+            let currentMaxDimension = 1600;
+            let compressedFile = null;
+            let attempts = 0;
+            const maxAttempts = 8;
             
-            if (width > maxDimension || height > maxDimension) {
-                if (width > height) {
-                    height = (height / width) * maxDimension;
-                    width = maxDimension;
+            while (attempts < maxAttempts) {
+                attempts++;
+                
+                // Calculate dimensions
+                let width = img.width;
+                let height = img.height;
+                
+                if (width > currentMaxDimension || height > currentMaxDimension) {
+                    if (width > height) {
+                        height = Math.round((height / width) * currentMaxDimension);
+                        width = currentMaxDimension;
+                    } else {
+                        width = Math.round((width / height) * currentMaxDimension);
+                        height = currentMaxDimension;
+                    }
+                }
+                
+                // Create canvas
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                
+                const ctx = canvas.getContext('2d');
+                
+                // Use better quality rendering
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                
+                // Set white background
+                ctx.fillStyle = 'white';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw image
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                // Convert to blob
+                const blob = await new Promise(resolve => {
+                    canvas.toBlob(
+                        blob => resolve(blob),
+                        'image/jpeg',
+                        currentQuality
+                    );
+                });
+                
+                if (!blob) {
+                    reject(new Error('Failed to compress image'));
+                    return;
+                }
+                
+                // Create file from blob
+                compressedFile = new File([blob], file.name, {
+                    type: 'image/jpeg',
+                    lastModified: Date.now()
+                });
+                
+                // Check if we're under the size limit
+                if (compressedFile.size <= maxSizeBytes) {
+                    break;
+                }
+                
+                // Adjust parameters for next attempt
+                if (currentQuality > 0.6) {
+                    // First reduce quality
+                    currentQuality -= 0.1;
                 } else {
-                    width = (width / height) * maxDimension;
-                    height = maxDimension;
+                    // Then reduce dimensions
+                    currentMaxDimension = Math.round(currentMaxDimension * 0.8);
+                    // Reset quality for the new dimension
+                    currentQuality = Math.min(0.9, currentQuality + 0.2);
                 }
             }
             
-            // Create canvas and compress
-            const canvas = document.createElement('canvas');
-            canvas.width = width;
-            canvas.height = height;
-            
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = 'white'; // Set white background
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(img, 0, 0, width, height);
-            
-            // Convert to blob with quality adjustment
-            canvas.toBlob(
-                (blob) => {
-                    if (blob) {
-                        // Create a new file from the blob
-                        const compressedFile = new File([blob], file.name, {
-                            type: 'image/jpeg',
-                            lastModified: Date.now()
-                        });
-                        resolve(compressedFile);
-                    } else {
-                        reject(new Error('Failed to compress image'));
-                    }
-                },
-                'image/jpeg',
-                0.8 // Compression quality (0.8 = 80%)
-            );
+            if (compressedFile) {
+                resolve(compressedFile);
+            } else {
+                reject(new Error('Failed to compress image'));
+            }
         };
         
         img.onerror = () => reject(new Error('Failed to load image'));
