@@ -1342,6 +1342,11 @@ async function sendMessage(event) {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let fullResponse = '';
+        
+        // Prepend START_TAG to response when in deep query mode
+        if (isDeepQueryMode) {
+            fullResponse += START_TAG;
+        }
 
         // Create React root for assistant message
         if (!assistantMessage.reactRoot) {
@@ -2449,6 +2454,12 @@ async function sendEditedMessage(newContent, apiConversationHistory) {
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
+        let continuedResponse = '';
+        
+        // Prepend START_TAG to response when in deep query mode
+        if (isDeepQueryMode) {
+            continuedResponse += START_TAG;
+        }
 
         // Create a new assistant message container
         assistantMessageContainer = document.createElement('div');
@@ -2720,6 +2731,11 @@ async function handleContinueGeneration(messageDiv, previousResponse) {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let continuedResponse = previousResponse;
+        
+        // Prepend START_TAG to response when in deep query mode
+        if (isDeepQueryMode && continuedResponse === previousResponse) {
+            continuedResponse = START_TAG + previousResponse;
+        }
 
         // Create or get React root for the message
         if (!messageDiv.reactRoot) {
