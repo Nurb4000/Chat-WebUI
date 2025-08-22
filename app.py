@@ -28,6 +28,7 @@ TIMEOUT = 10  # seconds
 RETRY_LIMIT = 3
 RATE_LIMIT = 0.5  # seconds
 
+
 # Global variables to store API key, base URL, and models
 api_key = None
 base_url = None
@@ -152,6 +153,39 @@ def parse_results(html_content, results=DEFAULT_RESULTS):
     countLink = 0
     return links
 
+def clean_html_text(text):
+    """Quick HTML text cleaning that preserves structure and readability"""
+    try:
+        tree = html.fromstring(text)
+        
+        # Remove script and style elements completely
+        for element in tree.xpath('//script | //style'):
+            element.getparent().remove(element)
+        
+        # Extract text content
+        text_content = tree.text_content()
+        
+        # Quick and simple cleaning for speed
+        # Normalize line breaks
+        text_content = text_content.replace('\r\n', '\n').replace('\r', '\n')
+        
+        # Split and quickly process lines
+        lines = text_content.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            # Strip and only add non-empty lines
+            stripped = line.strip()
+            if stripped:
+                # Quick space normalization
+                stripped = ' '.join(stripped.split())
+                cleaned_lines.append(stripped)
+        
+        return '\n'.join(cleaned_lines)
+    except Exception as e:
+        # Return empty string if HTML parsing fails
+        return ""
+
 async def fetch_and_format_text(session, url, index, retries=RETRY_LIMIT):
     for attempt in range(retries + 1):
         try:
@@ -160,10 +194,8 @@ async def fetch_and_format_text(session, url, index, retries=RETRY_LIMIT):
                 content_type = response.headers.get('Content-Type', '')
                 if 'text/html' not in content_type:
                     return ""
-                tree = html.fromstring(await response.text())
-                cleaned_text = ' '.join(
-                    node.strip() for node in tree.xpath('//text()[not(ancestor::style) and not(ancestor::script) and normalize-space()]')
-                )
+                html_content = await response.text()
+                cleaned_text = clean_html_text(html_content)
                 return f"Source text {index} from website {url}: \n \n {cleaned_text} \n \n"
         except (aiohttp.ClientError, Exception):
             if attempt < retries:
@@ -255,12 +287,9 @@ def handle_webpage_command(user_content):
         if 'text/html' not in content_type:
             return ""
         
-        tree = html.fromstring(response.content)
-        cleaned_text = ' '.join(
-            node.strip() for node in tree.xpath('//text()[not(ancestor::style) and not(ancestor::script) and normalize-space()]')
-        )
+        cleaned_text = clean_html_text(response.text)
         
-        return cleaned_text
+        return f"Source text from website {url}: \n \n {cleaned_text} \n \n"
     except httpx.HTTPStatusError as e:
         # Specifically handle HTTP errors like 404, 403, etc., after following redirects
         raise Exception(f"HTTP error {e.response.status_code} while fetching the webpage: {e}")
@@ -374,7 +403,7 @@ def chat():
                     system_content = "You are an assistant specialized in Question & Answer. Please provide a clear and concise response to the user query based on the video transcript. Query: {}".format(user_content)
                     user_content = f"{user_content} \n\n "
                 else:
-                    system_content = "You are an assistant specialized in summarizing videos. Please provide a clear, concise, and well-formatted summary of the video content."
+                    system_content = "You are an assistant specialized in summarizing videos. Please provide a clear, concise and well-formatted summary of the video content."
 
             # Check for arXiv link
             elif re.search(r'https?://arxiv\.org/(abs|pdf)/\d+\.\d+(v\d+)?', user_content):
@@ -387,7 +416,7 @@ def chat():
                     system_content = system_content = "You are an assistant specialized in Question & Answer. Please provide a clear and concise response to the user query based on the arXiv paper. Query: {}".format(user_content)
                     user_content = f"{user_content} \n\n "
                 else:
-                    system_content = "You are an assistant specialized in summarizing arXiv papers. Please provide a clear, concise, and well-formatted summary of the paper's content."
+                    system_content = "You are an assistant specialized in summarizing arXiv papers. Please provide a clear, concise and well-formatted summary of the paper's content."
 
             # Check for general link
             elif re.search(r'https?://[^\s]+', user_content):
@@ -399,7 +428,7 @@ def chat():
                     system_content = "You are an assistant specialized in Question & Answer. Please provide a clear and concise response to the user query based on the webpage content. Query: {}".format(user_content)
                     user_content = f"{user_content} \n\n "
                 else:
-                    system_content = "You are an assistant specialized in summarizing webpages. Please provide a clear, concise, and well-formatted summary of the webpage content."
+                    system_content = "You are an assistant specialized in summarizing webpages. Please provide a clear, concise and well-formatted summary of the webpage content."
 
             # No link, treat as general search
             else:
@@ -446,7 +475,7 @@ def chat():
 
     # Add deep query mode message if enabled
     if is_deep_query_mode:
-        messages.append({"role": "assistant", "content": f"{start_tag}\n"})
+        messages.append({"role": "assistant", "content": f"{start_tag}"})
 
     def generate():
         if openai_client is None:
@@ -454,6 +483,7 @@ def chat():
             return
 
         try:
+            print(messages)
             if parameters:
                 stream = openai_client.chat.completions.create(
                     model=selected_model,
