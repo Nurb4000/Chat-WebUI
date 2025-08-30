@@ -79,7 +79,7 @@ body,html {
 }
 
 #close-sidebar .icon-svg {
-    opacity: 0.
+    opacity: 0;
 }
 
 #close-sidebar:active .icon-svg,#close-sidebar:hover .icon-svg {
@@ -1750,4 +1750,18 @@ background-color: #404040;
 .katex {
     overflow-x: auto;
     white-space: normal;
+}
+
+/* Prevent KaTeX overflow */
+.katex-display {
+    overflow-x: hidden;
+    overflow-y: hidden;
+}
+
+/* Handle long equations */
+.katex-html {
+    overflow-x: hidden;
+    overflow-y: hidden;
+    white-space: normal;
+    word-wrap: break-word;
 }
