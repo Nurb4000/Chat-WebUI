@@ -54,7 +54,6 @@ body,html {
 #close-sidebar .icon-svg,#new-chat .icon-svg {
     width: 22px;
     height: 22px;
-    transition: opacity .2s,transform .1s;
     margin-top: .3px;
     filter: invert(100%);
     -webkit-font-smoothing: antialiased;
@@ -76,10 +75,6 @@ body,html {
 
 #close-sidebar {
     margin-left: 9.75px
-}
-
-#close-sidebar .icon-svg {
-    opacity: 0;
 }
 
 #close-sidebar:active .icon-svg,#close-sidebar:hover .icon-svg {
