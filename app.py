@@ -214,6 +214,39 @@ async def get_duckduckgo_results_and_texts(query, results=DEFAULT_RESULTS):
         formatted_texts = await asyncio.gather(*tasks)
         return links, formatted_texts
 
+def filter_reasoning_content(conversation_history, start_tag='<think>', end_tag='</think>'):
+    """
+    Filter out reasoning content (between start and end tags) from conversation history
+    only if the assistant message starts with start tag and has a corresponding end tag.
+    Only removes the first reasoning section between the first start tag and its end tag.
+    """
+    filtered_history = []
+    for message in conversation_history:
+        if message['role'] == 'assistant' and 'content' in message:
+            content = message['content']
+            # Check if content starts with start_tag and contains end_tag
+            if content.startswith(start_tag) and end_tag in content:
+                # Find the first occurrence of end_tag
+                first_end_pos = content.find(end_tag)
+                if first_end_pos != -1:
+                    # Keep content after the first end_tag
+                    filtered_content = content[first_end_pos + len(end_tag):].strip()
+                    if filtered_content:
+                        filtered_history.append({'role': 'assistant', 'content': filtered_content})
+                    else:
+                        # If no content after end_tag, skip this message
+                        continue
+                else:
+                    # If no end_tag found after start_tag, keep the entire message
+                    filtered_history.append(message)
+            else:
+                # Keep the message as is if it doesn't start with start_tag or doesn't have end_tag
+                filtered_history.append(message)
+        else:
+            # Keep non-assistant messages as is
+            filtered_history.append(message)
+    return filtered_history
+
 # Function to handle web search command
 def handle_search_command(user_content, results=DEFAULT_RESULTS):
     query = user_content
@@ -460,18 +493,21 @@ def chat():
                                 - Products: Group options by category (max 5 recommendations)
                                 """
 
+    # Filter reasoning content from conversation history
+    filtered_history = filter_reasoning_content(conversation_history, start_tag, end_tag='</think>')
+    
     # Handle messages with images
     if isinstance(user_content, list):
         # The message contains both text and image
         messages = [{"role": "system", "content": system_content}] if system_content else []
-        messages.extend(conversation_history)
+        messages.extend(filtered_history)
         messages.append({"role": "user", "content": user_content})
     else:
         # Regular text message
         if system_content:
-            messages = [{"role": "system", "content": system_content}] + conversation_history + [{"role": "user", "content": user_content + additional_text}]
+            messages = [{"role": "system", "content": system_content}] + filtered_history + [{"role": "user", "content": user_content + additional_text}]
         else:
-            messages = conversation_history + [{"role": "user", "content": user_content + additional_text}]
+            messages = filtered_history + [{"role": "user", "content": user_content + additional_text}]
 
     # Add deep query mode message if enabled
     if is_deep_query_mode:
@@ -483,7 +519,6 @@ def chat():
             return
 
         try:
-            print(messages)
             if parameters:
                 stream = openai_client.chat.completions.create(
                     model=selected_model,
@@ -556,10 +591,13 @@ def continue_generation():
                     pass
             # non-string values are left as-is
 
+    # Filter reasoning content from conversation history
+    filtered_history = filter_reasoning_content(conversation_history, start_tag='<think>', end_tag='</think>')
+    
     if system_content == '':
-        messages = conversation_history
+        messages = filtered_history
     else:
-        messages = [{"role": "system", "content": system_content}] + conversation_history
+        messages = [{"role": "system", "content": system_content}] + filtered_history
 
     def generate():
         if openai_client is None:
