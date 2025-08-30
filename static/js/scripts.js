@@ -133,8 +133,8 @@ function replaceLatexSyntax(content) {
             
             // Otherwise, apply LaTeX replacements
             return quotePart
-                .replace(/\\\[(.*?)\\\]/g, '$$$$($1)$$$$')  // Replace \[...\] with $$...$$
-                .replace(/\\\((.*?)\\\)/g, '$($1)$')        // Replace \(...\) with $...$
+                .replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, '$$$$($1)$$$$')  // Replace \[...\] with $$...$$ (allowing whitespace)
+                .replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, '$($1)$')        // Replace \(...\) with $...$ (allowing whitespace)
                 .replace(/(?<!\\)\\\[/g, '\\\\[')           // Replace \[ with \\[ (but not \\[)
                 .replace(/(?<!\\)\\\]/g, '\\\\]');          // Replace \] with \\] (but not \\])
         }).join('');
